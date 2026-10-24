@@ -25,8 +25,7 @@ This repository accompanies the research paper *"Cloud-Native Agentic Cyber Defe
 13. [Discussion and Standards Alignment](#discussion-and-standards-alignment)
 14. [Limitations](#limitations)
 15. [Future Work](#future-work)
-16. [Authors](#authors)
-17. [References](#references)
+
 
 ---
 
@@ -332,35 +331,4 @@ The workflow draws on the following reference points. These are design alignment
 
 ---
 
-## Authors
 
-Department of Computer Science and Engineering, Apex Institute of Technology, Chandigarh University, Mohali, Punjab, India.
-
-- Vikas Narlakanti
-- M.A. Kumar
-- Rijuta Sharma
-- Kunal Jain
-- Ridhima Sharma
-
----
-
-## References
-
-1. Kubernetes Authors, "Service," https://kubernetes.io/docs/concepts/services-networking/service/
-2. Y. Guo, "A review of machine learning-based zero-day attack detection: Challenges and future directions," *Computer Communications*, vol. 198, pp. 175-185, 2023.
-3. H. Hindy et al., "Utilising deep learning techniques for effective zero-day attack detection," *Electronics*, vol. 9, no. 10, p. 1684, 2020.
-4. L. Y. Por et al., "A systematic literature review on AI-based methods and challenges in detecting zero-day attacks," *IEEE Access*, vol. 12, pp. 144150-144163, 2024.
-5. M. A. Alsuwaiket, "ZeroDay-LLM: A large language model framework for zero-day threat detection in cybersecurity," *Information*, vol. 16, no. 11, p. 939, 2025.
-6. Y. Zhou, G. Cheng, K. Du, and Z. Chen, "Toward intelligent and secure cloud: Large language model empowered proactive defense," arXiv:2412.21051, 2024.
-7. Y. Hmimou et al., "A multi-agent system for cybersecurity threat detection and correlation using large language models," *IEEE Access*, vol. 13, pp. 150199-150215, 2025.
-8. N. V. Manohar, R. Shukla, and S. Abi, "Autonomous multi-agent system for integrated SRE and self-healing in cloud-native environments," ICSSSM 2025, Atlantis Press, pp. 525-535.
-9. Y. K. Saheed and J. E. Chukwuere, "Autonomous LLM agent: A memory-augmented, edge-optimized SHAP explanations with zero-day attack resilience in IoT/industrial IoT networks," *IEEE Internet of Things Journal*, vol. 13, no. 7, pp. 14213-14227, 2026.
-10. S. Sharma, A. Gupta et al., "A multi-agent agentic framework for autonomous cloud infrastructure monitoring and self-healing," *IJRASET*, 2026.
-11. Y. Zhu et al., "Teams of LLM agents can exploit zero-day vulnerabilities," arXiv:2406.01637, 2024.
-12. Qwen et al., "Qwen2.5 technical report," arXiv:2412.15115, 2024.
-13. Ollama, "Ollama API documentation," https://docs.ollama.com/api
-14. C. Pascoe, S. Quinn, and K. Scarfone, "The NIST Cybersecurity Framework (CSF) 2.0," NIST CSWP 29, 2024.
-15. A. Nelson, S. Rekhi, M. Souppaya, and K. Scarfone, "Incident response recommendations and considerations for cybersecurity risk management: A CSF 2.0 community profile," NIST SP 800-61 Rev. 3, 2025.
-16. E. Tabassi, "Artificial Intelligence Risk Management Framework (AI RMF 1.0)," NIST AI 100-1, 2023.
-17. OWASP Foundation, "OWASP Top 10 API Security Risks - 2023," https://owasp.org/API-Security/editions/2023/en/0x11-t10/
-18. MITRE, "MITRE ATT&CK," https://attack.mitre.org/
