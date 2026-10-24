@@ -1,5 +1,9 @@
 # Cloud-Native Agentic Cyber Defense Platform for Zero-Day Attack Mitigation
 
+> **Research Notice**
+>
+> This repository accompanies a research paper that has been accepted for presentation at a conference and is awaiting publication. The code, documentation, figures, and written content here are part of that ongoing research work awaiting publication. Until the paper is formally published, copying, reproducing, redistributing, or reusing any part of this material, including the text, figures, and experimental results, is not recommended and is not permitted without prior written permission. If you wish to refer to this work, please contact and cite the published paper once it becomes available.
+
 A Kubernetes-based prototype that combines an API gateway, behavioural monitoring, a detection service, deterministic risk-based decisions, and asynchronous large language model (LLM) reasoning to detect and contain suspicious API behaviour in cloud-native applications.
 
 The central design decision of this project is that **immediate enforcement never depends on LLM inference**. The security agent selects a deterministic action within milliseconds, while a local LLM (Qwen2.5:7B served through Ollama) performs contextual analysis in the background as an advisory layer.
