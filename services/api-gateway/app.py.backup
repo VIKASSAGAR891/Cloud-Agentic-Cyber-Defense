@@ -1,0 +1,721 @@
+from fastapi import FastAPI, Request, HTTPException, Security
+from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+import httpx
+import logging
+import time
+import os
+
+
+# ============================================================
+# LOGGING CONFIGURATION
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+logger = logging.getLogger("api-gateway")
+
+
+# ============================================================
+# FASTAPI APPLICATION
+# ============================================================
+
+app = FastAPI(
+    title="API Gateway",
+    version="1.0.0"
+)
+
+
+# ============================================================
+# API KEY CONFIGURATION
+# ============================================================
+
+API_KEY = os.getenv("API_GATEWAY_KEY")
+
+if not API_KEY:
+    raise RuntimeError(
+        "API_GATEWAY_KEY environment variable is not set"
+    )
+
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False
+)
+
+
+# ============================================================
+# MICROSERVICE CONFIGURATION
+# ============================================================
+
+SERVICES = {
+    "login": "http://login-service:8000",
+    "payment": "http://payment-service:8001",
+    "notification": "http://notification-service:8000",
+    "inventory": "http://inventory-service:8000",
+    "detection": "http://detection-service:8002"
+}
+
+
+# ============================================================
+# AUTOMATED THREAT MITIGATION
+# ============================================================
+
+# In-memory blocklist for detected malicious clients.
+#
+# Example:
+# {
+#     "127.0.0.1"
+# }
+#
+# Later this can be replaced with Redis or a
+# Kubernetes-native enforcement mechanism.
+
+blocked_clients = set()
+
+
+# ============================================================
+# RATE LIMITING CONFIGURATION
+# ============================================================
+
+RATE_LIMIT = 10
+RATE_WINDOW = 60
+
+# Stores:
+#
+# {
+#     "client_ip": [timestamp1, timestamp2, ...]
+# }
+
+request_history = {}
+
+
+# ============================================================
+# SECURITY EVENT REPORTING
+# ============================================================
+
+async def report_security_event(
+    event_type: str,
+    client_ip: str,
+    path: str,
+    reason: str = ""
+):
+
+    event = {
+        "event_type": event_type,
+        "client_ip": client_ip,
+        "path": path
+    }
+
+    if reason:
+        event["reason"] = reason
+
+    try:
+
+        async with httpx.AsyncClient(
+            timeout=5.0
+        ) as client:
+
+            response = await client.post(
+                f"{SERVICES['detection']}/events",
+                json=event
+            )
+
+        response.raise_for_status()
+
+        detection_response = response.json()
+
+        logger.info(
+            f"SECURITY EVENT REPORTED | "
+            f"type={event_type} | "
+            f"client={client_ip} | "
+            f"detection_response={detection_response}"
+        )
+
+        return detection_response
+
+    except Exception as e:
+
+        logger.error(
+            f"SECURITY EVENT REPORT FAILED | "
+            f"type={event_type} | "
+            f"client={client_ip} | "
+            f"error={str(e)}"
+        )
+
+        return None
+
+
+# ============================================================
+# APPLY AGENT MITIGATION DECISION
+# ============================================================
+
+def apply_mitigation(client_ip: str, detection_response):
+    """Apply the Agent's recommended security action."""
+
+    if not detection_response:
+        return None
+
+    # Detection Service exposes the Agent decision at the top level.
+    # The nested fallback keeps this compatible with older responses.
+    recommended_action = detection_response.get("recommended_action")
+    decision = detection_response.get("decision")
+
+    if not recommended_action and isinstance(decision, dict):
+        recommended_action = decision.get("recommended_action")
+
+    if not recommended_action:
+        agent_response = detection_response.get("agent_response")
+        if isinstance(agent_response, dict):
+            nested_decision = agent_response.get("decision")
+            if isinstance(nested_decision, dict):
+                recommended_action = nested_decision.get("recommended_action")
+
+    if recommended_action in (
+        "BLOCK_CLIENT",
+        "TEMPORARY_BLOCK"
+    ):
+        blocked_clients.add(client_ip)
+
+        threat = detection_response.get("threat")
+        risk_score = detection_response.get("risk_score")
+
+        if isinstance(decision, dict):
+            threat = threat or decision.get("threat")
+            risk_score = risk_score if risk_score is not None else decision.get("risk_score")
+
+        logger.warning(
+            f"AUTOMATED MITIGATION | "
+            f"action={recommended_action} | "
+            f"client={client_ip} | "
+            f"threat={threat} | "
+            f"risk_score={risk_score}"
+        )
+
+    return recommended_action
+
+
+# ============================================================
+# API KEY VERIFICATION
+# ============================================================
+
+async def verify_api_key(
+    request: Request,
+    api_key: str = Security(api_key_header)
+):
+
+    client_ip = (
+        request.client.host
+        if request.client
+        else "unknown"
+    )
+
+    # --------------------------------------------------------
+    # CHECK AUTOMATED BLOCKLIST
+    # --------------------------------------------------------
+
+    if client_ip in blocked_clients:
+
+        logger.warning(
+            f"MITIGATION BLOCK | "
+            f"client={client_ip} | "
+            f"path={request.url.path} | "
+            f"reason=THREAT_DETECTED"
+        )
+
+        raise HTTPException(
+            status_code=403,
+            detail="Client blocked due to detected malicious activity"
+        )
+
+    # --------------------------------------------------------
+    # API KEY MISSING
+    # --------------------------------------------------------
+
+    if api_key is None:
+
+        logger.warning(
+            f"AUTH FAILURE | "
+            f"API key missing | "
+            f"client={client_ip}"
+        )
+
+        detection_response = await report_security_event(
+            event_type="AUTH_FAILURE",
+            client_ip=client_ip,
+            path=request.url.path,
+            reason="API key missing"
+        )
+
+        apply_mitigation(
+            client_ip,
+            detection_response
+        )
+
+        raise HTTPException(
+            status_code=401,
+            detail="API key is required"
+        )
+
+    # --------------------------------------------------------
+    # INVALID API KEY
+    # --------------------------------------------------------
+
+    if api_key != API_KEY:
+
+        logger.warning(
+            f"AUTH FAILURE | "
+            f"Invalid API key | "
+            f"client={client_ip}"
+        )
+
+        detection_response = await report_security_event(
+            event_type="AUTH_FAILURE",
+            client_ip=client_ip,
+            path=request.url.path,
+            reason="Invalid API key"
+        )
+
+        # ----------------------------------------------------
+        # AUTOMATED MITIGATION DECISION
+        # ----------------------------------------------------
+
+        apply_mitigation(
+            client_ip,
+            detection_response
+        )
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
+
+    return api_key
+
+
+# ============================================================
+# RATE LIMIT CHECK
+# ============================================================
+
+def check_rate_limit(client_ip: str):
+
+    current_time = time.monotonic()
+
+    # --------------------------------------------------------
+    # Create entry for new client
+    # --------------------------------------------------------
+
+    if client_ip not in request_history:
+
+        request_history[client_ip] = []
+
+    # --------------------------------------------------------
+    # Remove expired requests
+    # --------------------------------------------------------
+
+    request_history[client_ip] = [
+        timestamp
+        for timestamp in request_history[client_ip]
+        if current_time - timestamp < RATE_WINDOW
+    ]
+
+    # --------------------------------------------------------
+    # Check rate limit
+    # --------------------------------------------------------
+
+    if len(request_history[client_ip]) >= RATE_LIMIT:
+
+        logger.warning(
+            f"RATE LIMIT EXCEEDED | "
+            f"client={client_ip} | "
+            f"requests={len(request_history[client_ip])}"
+        )
+
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Try again later."
+        )
+
+    # --------------------------------------------------------
+    # Record current request
+    # --------------------------------------------------------
+
+    request_history[client_ip].append(current_time)
+
+
+# ============================================================
+# REQUEST LOGGING + RATE LIMITING + MITIGATION MIDDLEWARE
+# ============================================================
+
+@app.middleware("http")
+async def request_logging_middleware(
+    request: Request,
+    call_next
+):
+
+    start_time = time.perf_counter()
+
+    client_ip = (
+        request.client.host
+        if request.client
+        else "unknown"
+    )
+
+    path = request.url.path
+
+    try:
+
+        # ====================================================
+        # SECURITY MONITORING ENDPOINT EXCEPTION
+        # ====================================================
+        #
+        # This endpoint must remain accessible so that we can
+        # inspect the active blocklist even after a client has
+        # been blocked.
+
+        if path == "/security/blocked":
+
+            response = await call_next(request)
+
+            duration = (
+                time.perf_counter() - start_time
+            ) * 1000
+
+            logger.info(
+                f"REQUEST | "
+                f"method={request.method} | "
+                f"path={path} | "
+                f"status={response.status_code} | "
+                f"duration_ms={duration:.2f} | "
+                f"client={client_ip}"
+            )
+
+            return response
+
+        # ====================================================
+        # AUTOMATED BLOCKLIST CHECK
+        # ====================================================
+        #
+        # IMPORTANT:
+        # This is checked BEFORE rate limiting.
+        #
+        # Therefore, once a malicious client is blocked,
+        # subsequent requests immediately receive HTTP 403
+        # instead of continuing through the rate limiter.
+
+        if client_ip in blocked_clients:
+
+            duration = (
+                time.perf_counter() - start_time
+            ) * 1000
+
+            logger.warning(
+                f"MITIGATION BLOCK | "
+                f"method={request.method} | "
+                f"path={path} | "
+                f"status=403 | "
+                f"client={client_ip} | "
+                f"duration_ms={duration:.2f}"
+            )
+
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail":
+                        "Client blocked due to detected malicious activity"
+                }
+            )
+
+        # ====================================================
+        # RATE LIMIT CHECK
+        # ====================================================
+
+        check_rate_limit(client_ip)
+
+        # ====================================================
+        # PROCESS REQUEST
+        # ====================================================
+
+        response = await call_next(request)
+
+        duration = (
+            time.perf_counter() - start_time
+        ) * 1000
+
+        logger.info(
+            f"REQUEST | "
+            f"method={request.method} | "
+            f"path={path} | "
+            f"status={response.status_code} | "
+            f"duration_ms={duration:.2f} | "
+            f"client={client_ip}"
+        )
+
+        return response
+
+    # ========================================================
+    # HTTP EXCEPTION
+    # ========================================================
+
+    except HTTPException as e:
+
+        duration = (
+            time.perf_counter() - start_time
+        ) * 1000
+
+        logger.warning(
+            f"REQUEST BLOCKED | "
+            f"method={request.method} | "
+            f"path={path} | "
+            f"status={e.status_code} | "
+            f"client={client_ip} | "
+            f"reason={e.detail}"
+        )
+
+        # ----------------------------------------------------
+        # RATE LIMIT SECURITY EVENT
+        # ----------------------------------------------------
+
+        if e.status_code == 429:
+
+            detection_response = await report_security_event(
+                event_type="RATE_LIMIT",
+                client_ip=client_ip,
+                path=path,
+                reason=str(e.detail)
+            )
+
+            logger.info(
+                f"SECURITY EVENT REPORTED | "
+                f"type=RATE_LIMIT | "
+                f"client={client_ip} | "
+                f"detection_response={detection_response}"
+            )
+
+            # -----------------------------------------------
+            # AUTOMATED MITIGATION
+            # -----------------------------------------------
+
+            apply_mitigation(
+                client_ip,
+                detection_response
+            )
+
+        # ----------------------------------------------------
+        # RETURN PROPER HTTP RESPONSE
+        # ----------------------------------------------------
+
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "detail": e.detail
+            }
+        )
+
+    # ========================================================
+    # UNEXPECTED ERROR
+    # ========================================================
+
+    except Exception as e:
+
+        duration = (
+            time.perf_counter() - start_time
+        ) * 1000
+
+        logger.error(
+            f"REQUEST ERROR | "
+            f"method={request.method} | "
+            f"path={path} | "
+            f"status=500 | "
+            f"duration_ms={duration:.2f} | "
+            f"client={client_ip} | "
+            f"error={str(e)}"
+        )
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error"
+            }
+        )
+
+
+# ============================================================
+# COMMON SERVICE CALLER
+# ============================================================
+
+async def call_service(url: str):
+
+    try:
+
+        async with httpx.AsyncClient(
+            timeout=5.0
+        ) as client:
+
+            response = await client.get(url)
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except httpx.TimeoutException:
+
+        logger.error(
+            f"SERVICE TIMEOUT | "
+            f"url={url}"
+        )
+
+        raise HTTPException(
+            status_code=504,
+            detail="Target service request timed out"
+        )
+
+    except httpx.RequestError as e:
+
+        logger.error(
+            f"SERVICE UNAVAILABLE | "
+            f"url={url} | "
+            f"error={str(e)}"
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="Target service is unavailable"
+        )
+
+    except httpx.HTTPStatusError as e:
+
+        logger.error(
+            f"SERVICE HTTP ERROR | "
+            f"url={url} | "
+            f"status={e.response.status_code}"
+        )
+
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail="Target service returned an error"
+        )
+
+
+# ============================================================
+# API GATEWAY HEALTH CHECK
+# ============================================================
+
+@app.get("/")
+def health_check():
+
+    logger.info(
+        "HEALTH CHECK | API Gateway"
+    )
+
+    return {
+        "service": "api-gateway",
+        "status": "running"
+    }
+
+
+# ============================================================
+# SERVICE DISCOVERY
+# ============================================================
+
+@app.get("/services")
+def list_services():
+
+    logger.info(
+        "SERVICE DISCOVERY | listing services"
+    )
+
+    return {
+        "services": SERVICES
+    }
+
+
+# ============================================================
+# SECURITY BLOCKLIST
+# ============================================================
+
+@app.get("/security/blocked")
+def get_blocked_clients():
+
+    return {
+        "blocked_clients": list(blocked_clients),
+        "total_blocked": len(blocked_clients)
+    }
+
+
+# ============================================================
+# LOGIN SERVICE
+# ============================================================
+
+@app.get(
+    "/login/health",
+    dependencies=[Security(verify_api_key)]
+)
+async def login_health():
+
+    logger.info(
+        "ROUTING | API Gateway -> login-service"
+    )
+
+    return await call_service(
+        f"{SERVICES['login']}/"
+    )
+
+
+# ============================================================
+# PAYMENT SERVICE
+# ============================================================
+
+@app.get(
+    "/payment/health",
+    dependencies=[Security(verify_api_key)]
+)
+async def payment_health():
+
+    logger.info(
+        "ROUTING | API Gateway -> payment-service"
+    )
+
+    return await call_service(
+        f"{SERVICES['payment']}/"
+    )
+
+
+# ============================================================
+# NOTIFICATION SERVICE
+# ============================================================
+
+@app.get(
+    "/notification/health",
+    dependencies=[Security(verify_api_key)]
+)
+async def notification_health():
+
+    logger.info(
+        "ROUTING | API Gateway -> notification-service"
+    )
+
+    return await call_service(
+        f"{SERVICES['notification']}/"
+    )
+
+
+# ============================================================
+# INVENTORY SERVICE
+# ============================================================
+
+@app.get(
+    "/inventory",
+    dependencies=[Security(verify_api_key)]
+)
+async def get_inventory():
+
+    logger.info(
+        "ROUTING | API Gateway -> inventory-service"
+    )
+
+    return await call_service(
+        f"{SERVICES['inventory']}/inventory"
+    )

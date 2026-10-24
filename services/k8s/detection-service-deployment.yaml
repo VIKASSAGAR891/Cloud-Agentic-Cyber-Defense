@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: detection-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: detection-service
+  template:
+    metadata:
+      labels:
+        app: detection-service
+    spec:
+      containers:
+        - name: detection-service
+          image: detection-service:v1
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8002
